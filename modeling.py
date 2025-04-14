@@ -202,7 +202,7 @@ class TemporalFusionTransformer(nn.Module):
         fin_emb = self.fin_embed(finance)
         med_emb = self.med_embed(media)
         mkt_emb = self.mkt_embed(market)
-        day_emb = self.day_embed(time_feat)
+        day_emb = self.day_embed(time_feat) #后两个可以先不加入，跑通之后再说？
         peak_emb = self.peak_embed(is_peak)
         
         # 特征合并
