@@ -17,7 +17,6 @@ class MaybeLayerNorm(nn.Module):
             self.ln = nn.LayerNorm(output_size, eps=eps)
         else:
             self.ln = nn.Identity()
-    
     def forward(self, x):
         return self.ln(x)
 
@@ -25,8 +24,6 @@ class GLU(nn.Module):
     def __init__(self, hidden_size, output_size):
         super().__init__()
         self.lin = nn.Linear(hidden_size, output_size * 2)
-
-
     def forward(self, x: Tensor) -> Tensor:
         x = self.lin(x)
         x = F.glu(x)
@@ -40,8 +37,6 @@ class GRN(nn.Module):
                  context_hidden_size=None,
                  dropout=0):
         super().__init__()
-
-        
         self.layer_norm = MaybeLayerNorm(output_size, hidden_size, eps=1e-3)
         self.lin_a = nn.Linear(input_size, hidden_size)
         if context_hidden_size is not None:
@@ -49,7 +44,6 @@ class GRN(nn.Module):
         self.lin_i = nn.Linear(hidden_size, hidden_size)
         self.glu = GLU(hidden_size, output_size if output_size else hidden_size)
         self.dropout = nn.Dropout(dropout)
-
         self.out_proj = nn.Linear(input_size, output_size) if output_size else None
 
     def forward(self, a: Tensor, c: Optional[Tensor] = None):
@@ -90,11 +84,8 @@ class Modified_GRN(nn.Module):
         if c is not None:
             x = x + self.lin_c(c)  
         x = F.elu(x)
-
         x = self.lin_i(x)
-
         x = self.dropout(x)
-
         x = self.glu(x)
         y = a if not self.out_proj else self.out_proj(a)
         x = x + y
@@ -106,31 +97,16 @@ class VSN(nn.Module):
     def __init__(self, config, num_inputs):
 
         super().__init__()
-
         self.joint_grn = GRN(config.hidden_size*num_inputs, config.hidden_size, output_size=num_inputs, context_hidden_size=config.hidden_size)
-
         self.var_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout) for _ in range(num_inputs)])
-
-
-
     def forward(self, x: Tensor, context: Optional[Tensor] = None):
-
         Xi = x.reshape(*x.shape[:-2], -1)
-
         grn_outputs = self.joint_grn(Xi, c=context)
-
         sparse_weights = F.softmax(grn_outputs, dim=-1)
-
         transformed_embed_list = [m(x[...,i,:]) for i, m in enumerate(self.var_grns)]
-
         transformed_embed = torch.stack(transformed_embed_list, dim=-1)
-
         variable_ctx = torch.matmul(transformed_embed, sparse_weights.unsqueeze(-1)).squeeze(-1)
-
-        
-
         # [B,k,d,d_model]->[B,k,H] [B,d,d_model]->[B,H]
-
         # 金融部分沿用原来的VSN
 
         return variable_ctx, sparse_weights
@@ -164,19 +140,12 @@ class CovariateEncoder(nn.Module):
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
 
         #x：[B,K,N,H]
-
-
-
         weights = self.var_weights(x).squeeze(-1)  #[B,K,N,H] -> [B,K,N,1]
-
         sparse_weights = F.softmax(weights, dim=-1)  #[B,K,N,1] -> [B,K,N]
-
         variable_ctx = torch.einsum('bknh,bkn->bkh', x, sparse_weights) #[B,K,N,H] * [B,K,N] -> [B,K,H]
-
         k_weights = self.k_weights(variable_ctx).squeeze(-1)  # ->[B, K，1]
         sparse_k_weights = F.softmax(k_weights, dim=1)        # [B, K]
         reduced_ctx = torch.einsum('bkh,bk->bh', variable_ctx, sparse_k_weights)  # [B, H]
-        
         cs, ch, cc = tuple(m(reduced_ctx) for m in self.context_grns)
         ce = self.ce_grn(variable_ctx)
         return cs, ce, ch, cc
@@ -239,21 +208,12 @@ class TemporalFusionTransformer(nn.Module):
         
         #情绪编码
         self.senti_encoder = CovariateEncoder(config)
-
-        
-
-        #情绪编码
-
-        self.senti_encoder = CovariateEncoder(config)
-
-
         #金融vsn
         self.finVSN = VSN(config, config.fin_varible_num, cs)
         #ce变换
         self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False)
         self.enrichment_grn = Modified_GRN(config.hidden_size, config.hidden_size, context_hidden_size=config.hidden_size, dropout=config.dropout)
-        
-        self.enrichment_grn = Modified_GRN(config.hidden_size, config.hidden_size, context_hidden_size=config.hidden_size, dropout=config.dropout)
+
         # 时序编码器
         #self.lstm = nn.LSTM(config.d_model, config.d_model, num_layers=3)
         self.attention = InterpretableMultiHeadAttention(config)
@@ -314,17 +274,14 @@ class TemporalFusionTransformer(nn.Module):
         '''
         
         #嵌入后部分
-        
         #情绪编码
         cs, ce, ch, cc = self.senti_encoder(senti_inp)
-        
         '''
         cs/ch/cc: [B，H=hidden_size]
         ce: [B，k=1000, H=hidden_size]
         '''
         ch, cc = ch.unsqueeze(0), cc.unsqueeze(0) 
         ce , _ = self.ce_encoder(ce)              #LSTM
-        
 
         #金融编码
         fin_features , _ = self.finVSN(fin_inp,cs) 
@@ -332,21 +289,20 @@ class TemporalFusionTransformer(nn.Module):
         VSN：[B,k,d,d_model]->[B,k,H]
         '''
         fin, state = self.tem_encoder(fin_features, (ch, cc)) #LSTM，维度不变
-
         main_features = fin + self.input_gate(fin_features)  #skip_connection
         main_features = self.input_gate_ln(main_features)
 
         #融合
         enriched = self.enrichment_grn(temporal_features, c=ce)
         
-        #后面把enriched输入Attention
+        #把enriched输入Attention
         output, _ = self.attention(enriched, mask_future_timesteps=True )
         
         # LSTM + Attention
         #lstm_out, _ = self.lstm(combined.permute(1,0,2))      # [T, B, d_model] #不需要吧
         #attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
 
-        
+    
         #截取decoder时段的数据
         output = output[:, self.encoder_length:, :]
         temporal_features = temporal_features[:, self.encoder_length:, :]
