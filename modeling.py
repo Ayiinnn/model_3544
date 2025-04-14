@@ -293,7 +293,7 @@ class TemporalFusionTransformer(nn.Module):
         main_features = self.input_gate_ln(main_features)
 
         #融合
-        enriched = self.enrichment_grn(temporal_features, c=ce)
+        enriched = self.enrichment_grn(main_features, c=ce)
         
         #把enriched输入Attention
         output, _ = self.attention(enriched, mask_future_timesteps=True )
