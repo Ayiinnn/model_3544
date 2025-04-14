@@ -65,7 +65,7 @@ class VSN(nn.Module):
         variable_ctx = torch.matmul(transformed_embed, sparse_weights.unsqueeze(-1)).squeeze(-1)
         
         # [B,k,d,d_model]->[B,k,H] [B,d,d_model]->[B,H]
-
+        # 金融部分沿用原来的VSN
         return variable_ctx, sparse_weights
 
 class CovariateEncoder(nn.Module):
