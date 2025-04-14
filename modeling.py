@@ -71,7 +71,8 @@ class VSN(nn.Module):
 class CovariateEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.var_weights = nn.Linear(self.hidden_size, 1)
+        self.var_weights = nn.Linear(config.hidden_size, 1)
+        self.k_weights = nn.Linear(config.hidden_size, 1)
         self.context_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout) for _ in range(3)])
         self.ce_grn = GRN(config.hidden_size, config.hidden_size, dropout=config.dropout)
 
@@ -81,7 +82,11 @@ class CovariateEncoder(nn.Module):
         weights = self.var_weights(x).squeeze(-1)  #[B,K,N,H] -> [B,K,N,1]
         sparse_weights = F.softmax(weights, dim=-1)  #[B,K,N,1] -> [B,K,N]
         variable_ctx = torch.einsum('bknh,bkn->bkh', x, sparse_weights) #[B,K,N,H] * [B,K,N] -> [B,K,H]
-        reduced_ctx = variable_ctx.mean(dim=1)  # [B,K,H] -> [B,H]
+
+        k_weights = self.k_weights(variable_ctx).squeeze(-1)  # ->[B, K，1]
+        sparse_k_weights = F.softmax(k_weights, dim=1)        # [B, K]
+        reduced_ctx = torch.einsum('bkh,bk->bh', variable_ctx, sparse_k_weights)  # [B, H]
+        
         cs, ch, cc = tuple(m(reduced_ctx) for m in self.context_grns)
         ce = self.ce_grn(variable_ctx)
         return cs, ce, ch, cc
