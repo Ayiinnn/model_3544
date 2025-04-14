@@ -115,6 +115,14 @@ class TemporalFusionTransformer(nn.Module):
         self.output_layer = nn.Linear(config.d_model, 1)       # 单点输出
 
     def forward(self, x):
+        '''
+        滑动窗口处理后的数据(字典）：
+        {
+        finance: [B~2800(若步长取5)，k=1000，d=17]
+        arket: [B~2800(若步长取5)，k=1000，d=1]
+        media: [B~2800(若步长取5)，k=1000，d=6]
+        }
+        '''
         # 输入分解 [B, T, 24]
         finance = x[:, :, :17]          # 金融17维
         media = x[:, :, 17:23]          # 媒体6维
@@ -135,16 +143,31 @@ class TemporalFusionTransformer(nn.Module):
         # 每个特征单独embedding形成 [B,T,d,d_model]?
         # 不全部合并，而是分成senti_inp，fin_inp 即[B,T,d_senti,d_model],[B,T,d_fin,d_model]?
         # 另外是不是不应该加和而是沿特征维度拼接？例：senti_inp = torch.cat([med_emb,mkt_emb], dim =-2)  （-2对应[B,T,d,d_model]中的d）
-
+        
+        '''
+        嵌入后的数据：
+        senti_inp: [B，k=1000，d=17, H=d_model]
+        fin_inp: [B，k=1000，d=7,H=d_model]
+        '''
+        
         #嵌入后部分
+        
         #情绪编码
         cs, ce, ch, cc = self.senti_encoder(senti_inp)
+        
+        '''
+        cs/ch/cc: [B，H=hidden_size]
+        ce: [B，k=1000, H=hidden_size]
+        '''
         ch, cc = ch.unsqueeze(0), cc.unsqueeze(0) 
         ce , _ = self.ce_encoder(ce)              #LSTM
 
         #金融编码
-        fin_features , _ = self.finVSN(fin_inp,cs)
-        fin, state = self.tem_encoder(fin_features, (ch, cc)) #LSTM
+        fin_features , _ = self.finVSN(fin_inp,cs) 
+        '''
+        VSN：[B,k,d,d_model]->[B,k,H]
+        '''
+        fin, state = self.tem_encoder(fin_features, (ch, cc)) #LSTM，维度不变
 
         main_features = fin + self.input_gate(fin_features)  #skip_connection
         main_features = self.input_gate_ln(main_features)
