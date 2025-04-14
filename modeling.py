@@ -71,11 +71,9 @@ class VSN(nn.Module):
 class CovariateEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.hidden_size = config.hidden_size
-        self.num_static_vars = config.num_static_vars
         self.var_weights = nn.Linear(self.hidden_size, 1)
-
-        self.context_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout)for _ in range(4)])
+        self.context_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout) for _ in range(3)])
+        self.ce_grn = GRN(config.hidden_size, config.hidden_size, dropout=config.dropout)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         #x：[B,K,N,H]
@@ -83,9 +81,9 @@ class CovariateEncoder(nn.Module):
         weights = self.var_weights(x).squeeze(-1)  #[B,K,N,H] -> [B,K,N,1]
         sparse_weights = F.softmax(weights, dim=-1)  #[B,K,N,1] -> [B,K,N]
         variable_ctx = torch.einsum('bknh,bkn->bkh', x, sparse_weights) #[B,K,N,H] * [B,K,N] -> [B,K,H]
-
         reduced_ctx = variable_ctx.mean(dim=1)  # [B,K,H] -> [B,H]
-        cs, ce, ch, cc = tuple(m(reduced_ctx) for m in self.context_grns)
+        cs, ch, cc = tuple(m(reduced_ctx) for m in self.context_grns)
+        ce = self.ce_grn(variable_ctx)
         return cs, ce, ch, cc
 
 class TemporalFusionTransformer(nn.Module):
