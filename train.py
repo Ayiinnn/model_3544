@@ -33,6 +33,7 @@ def main():
     
     # 训练循环
     for epoch in range(args.epochs):
+        #不太清楚，是不是要逐batch遍历，否则[2800,1000,24] 处理2800个样本会不会太大了，内存不支持
         model.train()
         optimizer.zero_grad()
         outputs = model(train_X)
