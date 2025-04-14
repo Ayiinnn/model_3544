@@ -102,10 +102,11 @@ class TemporalFusionTransformer(nn.Module):
         self.fin_embed = nn.Linear(17, config.d_model)         # 金融特征
         self.med_embed = nn.Linear(6, config.d_model)          # 媒体特征
         self.mkt_embed = nn.Linear(1, config.d_model)          # 市场情绪
-
+        
+        #情绪编码
+        self.senti_encoder = CovariateEncoder(config)
         #金融vsn
         self.finVSN = VSN(config, config.fin_varible_num, cs)
-        
         #ce变换
         self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False)
         
@@ -121,9 +122,9 @@ class TemporalFusionTransformer(nn.Module):
         '''
         滑动窗口处理后的数据(字典）：
         {
-        finance: [B~2800(若步长取5)，k=1000，d=17]
-        arket: [B~2800(若步长取5)，k=1000，d=1]
-        media: [B~2800(若步长取5)，k=1000，d=6]
+        finance: [B=100，k=1000，d=17]  #步长取5则batch_size和在2800左右，batch_size可以取100?
+        arket: [B，k=1000，d=1]
+        media: [B，k=1000，d=6]
         }
         '''
         # 输入分解 [B, T, 24]
