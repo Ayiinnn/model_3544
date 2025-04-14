@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import torch
 
+'''
+提前处理好并存储是不是好一点
+'''
 class MultiModalDataLoader:
     def __init__(self, window_size=24, horizon=1):
         self.window_size = window_size  # 输入窗口长度（小时）
