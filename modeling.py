@@ -27,28 +27,69 @@ class GLU(nn.Module):
         return x
 
 class GRN(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size=None, context_size=None, dropout=0):
+    def __init__(self,
+                 input_size,
+                 hidden_size, 
+                 output_size=None,
+                 context_hidden_size=None,
+                 dropout=0):
         super().__init__()
-        self.layer_norm = MaybeLayerNorm(output_size, hidden_size)
+
+        
+        self.layer_norm = MaybeLayerNorm(output_size, hidden_size, eps=1e-3)
         self.lin_a = nn.Linear(input_size, hidden_size)
-        if context_size is not None:
-            self.lin_c = nn.Linear(context_size, hidden_size, bias=False)
+        if context_hidden_size is not None:
+            self.lin_c = nn.Linear(context_hidden_size, hidden_size, bias=False)
         self.lin_i = nn.Linear(hidden_size, hidden_size)
-        self.glu = nn.GLU()
+        self.glu = GLU(hidden_size, output_size if output_size else hidden_size)
         self.dropout = nn.Dropout(dropout)
         self.out_proj = nn.Linear(input_size, output_size) if output_size else None
 
-    def forward(self, a, c=None):
+    def forward(self, a: Tensor, c: Optional[Tensor] = None):
         x = self.lin_a(a)
         if c is not None:
-            x = x + self.lin_c(c)
+            x = x + self.lin_c(c).unsqueeze(1)
         x = F.elu(x)
         x = self.lin_i(x)
         x = self.dropout(x)
         x = self.glu(x)
-        if self.out_proj:
-            x = x + self.out_proj(a)
-        return self.layer_norm(x)
+        y = a if not self.out_proj else self.out_proj(a)
+        x = x + y
+        x = self.layer_norm(x)
+        return x 
+
+class Modified_GRN(nn.Module):
+    def __init__(self,
+                 input_size,          
+                 hidden_size, 
+                 output_size=None,
+                 context_hidden_size=None,  
+                 dropout=0):
+        super().__init__()
+
+        self.layer_norm = MaybeLayerNorm(output_size, hidden_size, eps=1e-3)
+        self.lin_a = nn.Linear(input_size, hidden_size)
+
+        if context_hidden_size is not None:
+            self.lin_c = nn.Linear(context_hidden_size, hidden_size, bias=False)
+        
+        self.lin_i = nn.Linear(hidden_size, hidden_size)
+        self.glu = GLU(hidden_size, output_size if output_size else hidden_size)
+        self.dropout = nn.Dropout(dropout)
+        self.out_proj = nn.Linear(input_size, output_size) if output_size else None
+
+    def forward(self, a: Tensor, c: Optional[Tensor] = None):
+        x = self.lin_a(a)  # (B, T, input_size) → (B, T, hidden_size)
+        if c is not None:
+            x = x + self.lin_c(c)  
+        x = F.elu(x)
+        x = self.lin_i(x)
+        x = self.dropout(x)
+        x = self.glu(x)
+        y = a if not self.out_proj else self.out_proj(a)
+        x = x + y
+        x = self.layer_norm(x)
+        return x
         
 class VSN(nn.Module):
     def __init__(self, config, num_inputs):
@@ -109,6 +150,7 @@ class TemporalFusionTransformer(nn.Module):
         self.finVSN = VSN(config, config.fin_varible_num, cs)
         #ce变换
         self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False)
+        self.enrichment_grn = Modified_GRN(config.hidden_size, config.hidden_size, context_hidden_size=config.hidden_size, dropout=config.dropout)
         
         # 时序编码器
         self.lstm = nn.LSTM(config.d_model, config.d_model, num_layers=3)
@@ -176,7 +218,7 @@ class TemporalFusionTransformer(nn.Module):
         main_features = fin + self.input_gate(fin_features)  #skip_connection
         main_features = self.input_gate_ln(main_features)
 
-        #融合(modifiedGRN)
+        #融合
         enriched = self.enrichment_grn(temporal_features, c=ce)
         
         #后面把enriched输入Attention
