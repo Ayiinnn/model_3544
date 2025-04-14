@@ -15,6 +15,16 @@ class MaybeLayerNorm(nn.Module):
     
     def forward(self, x):
         return self.ln(x)
+        
+class GLU(nn.Module):
+    def __init__(self, hidden_size, output_size):
+        super().__init__()
+        self.lin = nn.Linear(hidden_size, output_size * 2)
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.lin(x)
+        x = F.glu(x)
+        return x
 
 class GRN(nn.Module):
     def __init__(self, input_size, hidden_size, output_size=None, context_size=None, dropout=0):
@@ -39,6 +49,44 @@ class GRN(nn.Module):
         if self.out_proj:
             x = x + self.out_proj(a)
         return self.layer_norm(x)
+        
+class VSN(nn.Module):
+    def __init__(self, config, num_inputs):
+        super().__init__()
+        self.joint_grn = GRN(config.hidden_size*num_inputs, config.hidden_size, output_size=num_inputs, context_hidden_size=config.hidden_size)
+        self.var_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout) for _ in range(num_inputs)])
+
+    def forward(self, x: Tensor, context: Optional[Tensor] = None):
+        Xi = x.reshape(*x.shape[:-2], -1)
+        grn_outputs = self.joint_grn(Xi, c=context)
+        sparse_weights = F.softmax(grn_outputs, dim=-1)
+        transformed_embed_list = [m(x[...,i,:]) for i, m in enumerate(self.var_grns)]
+        transformed_embed = torch.stack(transformed_embed_list, dim=-1)
+        variable_ctx = torch.matmul(transformed_embed, sparse_weights.unsqueeze(-1)).squeeze(-1)
+        
+        # [B,k,d,d_model]->[B,k,H] [B,d,d_model]->[B,H]
+
+        return variable_ctx, sparse_weights
+
+class CovariateEncoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_size = config.hidden_size
+        self.num_static_vars = config.num_static_vars
+        self.var_weights = nn.Linear(self.hidden_size, 1)
+
+        self.context_grns = nn.ModuleList([GRN(config.hidden_size, config.hidden_size, dropout=config.dropout)for _ in range(4)])
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        #x：[B,K,N,H]
+
+        weights = self.var_weights(x).squeeze(-1)  #[B,K,N,H] -> [B,K,N,1]
+        sparse_weights = F.softmax(weights, dim=-1)  #[B,K,N,1] -> [B,K,N]
+        variable_ctx = torch.einsum('bknh,bkn->bkh', x, sparse_weights) #[B,K,N,H] * [B,K,N] -> [B,K,H]
+
+        reduced_ctx = variable_ctx.mean(dim=1)  # [B,K,H] -> [B,H]
+        cs, ce, ch, cc = tuple(m(reduced_ctx) for m in self.context_grns)
+        return cs, ce, ch, cc
 
 class TemporalFusionTransformer(nn.Module):
     def __init__(self, config):
@@ -53,10 +101,10 @@ class TemporalFusionTransformer(nn.Module):
         self.mkt_embed = nn.Linear(1, config.d_model)          # 市场情绪
 
         #金融vsn
-        self.simple_vsn = Modified_VSN(config,config.fin_varible_num)
+        self.finVSN = VSN(config, config.fin_varible_num, cs)
         
         #ce变换
-        self.ce_encoder = nn.LSTM(input_size = config.d_model, hidden_size = config.d_model, bidirectional = False)
+        self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False)
         
         # 时序编码器
         self.lstm = nn.LSTM(config.d_model, config.d_model, num_layers=3)
@@ -84,19 +132,18 @@ class TemporalFusionTransformer(nn.Module):
         # 特征合并
         combined = fin_emb + med_emb + mkt_emb + day_emb + peak_emb  # [B, T, d_model]
 
-
         # 每个特征单独embedding形成 [B,T,d,d_model]?
         # 不全部合并，而是分成senti_inp，fin_inp 即[B,T,d_senti,d_model],[B,T,d_fin,d_model]?
         # 另外是不是不应该加和而是沿特征维度拼接？例：senti_inp = torch.cat([med_emb,mkt_emb], dim =-2)  （-2对应[B,T,d,d_model]中的d）
 
         #嵌入后部分
         #情绪编码
-        ce, ch, cc = self.senti_encoder(senti_inp)
+        cs, ce, ch, cc = self.senti_encoder(senti_inp)
         ch, cc = ch.unsqueeze(0), cc.unsqueeze(0) 
         ce , _ = self.ce_encoder(ce)              #LSTM
 
         #金融编码
-        fin_features = self.simple_vsn(fin_inp)
+        fin_features , _ = self.finVSN(fin_inp,cs)
         fin, state = self.tem_encoder(fin_features, (ch, cc)) #LSTM
 
         main_features = fin + self.input_gate(fin_features)  #skip_connection
