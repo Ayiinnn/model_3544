@@ -109,6 +109,22 @@ class VSN(nn.Module):
         # 金融部分沿用原来的VSN
         return variable_ctx, sparse_weights
 
+class ContinuousEmbedding(nn.Module):   #极简的连续变量嵌入层
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.weight = nn.Parameter(torch.Tensor(1, 1, 1, hidden_size))  # [1,1,1,H]
+        self.bias = nn.Parameter(torch.zeros(1, 1, 1, hidden_size))     # [1,1,1,H]
+        torch.nn.init.xavier_normal_(self.weight)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        输入: [B, K, D]
+        输出: [B, K, D, H]
+        """
+        x = x.unsqueeze(-1) [B, K, D, 1]
+        return x * self.weight + self.bias #[B,K,D,1] * [1,1,1,H] → [B,K,D,H]
+
+
 class CovariateEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -137,7 +153,10 @@ class TemporalFusionTransformer(nn.Module):
         super().__init__()
         self.d_model = config.d_model
         
-        # 多模态Embedding层
+        # 多模态Embedding层  
+        '''
+        可参考的连续变量嵌入层：self.conti_embed = ContinuousEmbedding(config.hidden_size)
+        '''
         self.day_embed = nn.Embedding(7, config.d_model)       # 星期几
         self.peak_embed = nn.Embedding(2, config.d_model)      # 峰值时段
         self.fin_embed = nn.Linear(17, config.d_model)         # 金融特征
@@ -177,6 +196,9 @@ class TemporalFusionTransformer(nn.Module):
         is_peak = (media[:, :, 0] > 1000).long()  # 峰值判断
         
         # Embedding处理
+         '''
+        可参考的连续变量嵌入：fin_emb = self.conti_embed(finance)
+        '''
         fin_emb = self.fin_embed(finance)
         med_emb = self.med_embed(media)
         mkt_emb = self.mkt_embed(market)
@@ -185,10 +207,12 @@ class TemporalFusionTransformer(nn.Module):
         
         # 特征合并
         combined = fin_emb + med_emb + mkt_emb + day_emb + peak_emb  # [B, T, d_model]
-
-        # 每个特征单独embedding形成 [B,T,d,d_model]?
-        # 不全部合并，而是分成senti_inp，fin_inp 即[B,T,d_senti,d_model],[B,T,d_fin,d_model]?
-        # 另外是不是不应该加和而是沿特征维度拼接？例：senti_inp = torch.cat([med_emb,mkt_emb], dim =-2)  （-2对应[B,T,d,d_model]中的d）
+        
+        '''
+        每个特征单独embedding形成 [B,T,d,d_model]?
+        不全部合并，而是分成senti_inp，fin_inp 即[B,T,d_senti,d_model],[B,T,d_fin,d_model]?
+        另外是不是不应该加和而是沿特征维度拼接？例：senti_inp = torch.cat([med_emb,mkt_emb], dim =-2)  （-2对应[B,T,d,d_model]中的d）
+        '''
         
         '''
         嵌入后的数据：
