@@ -79,7 +79,8 @@ class TemporalFusionTransformer(nn.Module):
 
 
         # 每个特征单独embedding形成 [B,T,d,d_model]?
-        # 不全部合并，而是分成senti_inp, target，fin_inp 即[B,T,d_senti,d_model],[B,T,d_model],[B,T,d_fin,d_model]?
+        # 不全部合并，而是分成senti_inp, target(复用金融第一维度），fin_inp 即[B,T,d_senti,d_model],[B,T,d_model],[B,T,d_fin,d_model]?
+        # 另外是不是不应该加和而是沿特征维度拼接？例：torch.cat([med_emb,mkt_emb], dim=-2)  （-2对应[B,T,d,d_model]中的d）
         
         # LSTM + Attention
         lstm_out, _ = self.lstm(combined.permute(1,0,2))      # [T, B, d_model]
