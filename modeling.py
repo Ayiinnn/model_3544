@@ -52,6 +52,9 @@ class TemporalFusionTransformer(nn.Module):
         self.med_embed = nn.Linear(6, config.d_model)          # 媒体特征
         self.mkt_embed = nn.Linear(1, config.d_model)          # 市场情绪
 
+        #金融vsn
+        self.simple_vsn = Modified_VSN(config,config.fin_varible_num)
+        
         #ce变换
         self.ce_encoder = nn.LSTM(input_size = config.d_model, hidden_size = config.d_model, bidirectional = False)
         
