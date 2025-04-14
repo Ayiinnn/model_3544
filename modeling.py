@@ -76,6 +76,10 @@ class TemporalFusionTransformer(nn.Module):
         
         # 特征合并
         combined = fin_emb + med_emb + mkt_emb + day_emb + peak_emb  # [B, T, d_model]
+
+
+        # 每个特征单独embedding形成 [B,T,d,d_model]?
+        # 不全部合并，而是分成senti_inp, target，fin_inp 即[B,T,d_senti,d_model],[B,T,d_model],[B,T,d_fin,d_model]?
         
         # LSTM + Attention
         lstm_out, _ = self.lstm(combined.permute(1,0,2))      # [T, B, d_model]
