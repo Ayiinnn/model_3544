@@ -123,7 +123,7 @@ class ContinuousEmbedding(nn.Module):   #极简的连续变量嵌入层
         输入: [B, K, D]
         输出: [B, K, D, H]
         """
-        x = x.unsqueeze(-1) [B, K, D, 1]
+        x = x.unsqueeze(-1) 
         return x * self.weight + self.bias #[B,K,D,1] * [1,1,1,H] → [B,K,D,H]
 
 
