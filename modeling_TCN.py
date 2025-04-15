@@ -216,7 +216,7 @@ class TemporalFusionTransformer(nn.Module):
         self.input_gate_ln = LayerNorm(config.hidden_size, eps=1e-3)
       
         # 时序编码
-        self.position_encoder = PositionalEncoding(config.hidden_size):
+        self.position_encoder = PositionalEncoding(config.hidden_size)
         self.tcn = TCN(config.hidden_size)
         self.attention_gate = GLU(config.hidden_size, config.hidden_size)
         self.attention_ln = LayerNorm(config.hidden_size, eps=1e-3)
@@ -274,7 +274,7 @@ class TemporalFusionTransformer(nn.Module):
         enriched = self.enrichment_grn(main_features, c=ce)
         
         #把enriched输入tcn
-        enriched = self.position_encoder(enriched):
+        enriched = self.position_encoder(enriched)
         output = self.tcn(enriched)
     
         #gate
