@@ -297,25 +297,18 @@ class TemporalFusionTransformer(nn.Module):
         
         #把enriched输入Attention
         output, _ = self.attention(enriched, mask_future_timesteps=True )
-        
-        # LSTM + Attention
-        #lstm_out, _ = self.lstm(combined.permute(1,0,2))      # [T, B, d_model] #不需要吧
-        #attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
-
     
         #截取decoder时段的数据
         output = output[:, self.encoder_length:, :]
         temporal_features = temporal_features[:, self.encoder_length:, :]
         enriched = enriched[:, self.encoder_length:, :]
+        
         #gate
-        output = self.attention_gate(output)
-        output = output + enriched
-        output = self.attention_ln(output)
+        x = self.attention_gate(output)
+        x = output + enriched
+        x = self.attention_ln(output)
 
         # Position-wise feed-forward
-        output = self.positionwise_grn(output)
-
-        #还有position_wise grn(可选） 假设 attention输出x
         x = self.positionwise_grn(x)
 
         x = self.decoder_gate(x)
