@@ -196,15 +196,14 @@ class TemporalFusionTransformer(nn.Module):
         super().__init__()
         self.d_model = config.d_model
         
-        # 多模态Embedding层  
-        '''
-        可参考的连续变量嵌入层：self.conti_embed = ContinuousEmbedding(config.hidden_size)
-        '''
-        self.day_embed = nn.Embedding(7, config.d_model)       # 星期几
-        self.peak_embed = nn.Embedding(2, config.d_model)      # 峰值时段
-        self.fin_embed = nn.Linear(17, config.d_model)         # 金融特征
-        self.med_embed = nn.Linear(6, config.d_model)          # 媒体特征
-        self.mkt_embed = nn.Linear(1, config.d_model)          # 市场情绪
+        # Embedding层  
+        self.conti_embed = ContinuousEmbedding(config.hidden_size)
+        
+        #self.day_embed = nn.Embedding(7, config.d_model)       # 星期几
+        #self.peak_embed = nn.Embedding(2, config.d_model)      # 峰值时段
+        #self.fin_embed = nn.Linear(17, config.d_model)         # 金融特征
+        #self.med_embed = nn.Linear(6, config.d_model)          # 媒体特征
+        #self.mkt_embed = nn.Linear(1, config.d_model)          # 市场情绪
         
         #情绪编码
         self.senti_encoder = CovariateEncoder(config)
@@ -230,46 +229,38 @@ class TemporalFusionTransformer(nn.Module):
         
         # 输出层
         #self.output_layer = nn.Linear(config.d_model, 1)       # 单点输出
-        self.output_layer = nn.Linear(config.hidden_size, 1)  # 单点输出
+        #self.output_layer = nn.Linear(config.hidden_size, 1)  # 单点输出
+        self.output_layer = nn.Sequential(
+            nn.Linear(config.hidden_size, 3 * config.hidden_size),  
+            nn.ReLU(),
+            nn.Linear(3 * config.hidden_size, 3)                  
+        )  # 输出3个点
 
     def forward(self, x):
-        '''
-        滑动窗口处理后的数据(字典）：
-        {
-        finance: [B=100，k=1000，d=17]  #步长取5则batch_size和在2800左右，batch_size可以取100?
-        arket: [B，k=1000，d=1]
-        media: [B，k=1000，d=6]
-        }
-        '''
-        # 输入分解 [B, T, 24]
-        finance = x[:, :, :17]          # 金融17维
-        media = x[:, :, 17:23]          # 媒体6维
-        market = x[:, :, 23:]           # 市场情绪1维
-        time_feat = x[:, :, -3].long()  # 星期几（假设为最后第3列）
-        is_peak = (media[:, :, 0] > 1000).long()  # 峰值判断
+        
+        # 输入分解 [B, T, 20]
+        finance = x[:, :, :13]          # 金融13维
+        senti = x[:, :, 13:]          # 媒体+市场7维
+        #time_feat = x[:, :, -3].long()  # 星期几（假设为最后第3列）
+        #is_peak = (media[:, :, 0] > 1000).long()  # 峰值判断
         
         # Embedding处理
-         '''
-        可参考的连续变量嵌入：fin_emb = self.conti_embed(finance)
-        '''
-        fin_emb = self.fin_embed(finance)
-        med_emb = self.med_embed(media)
-        mkt_emb = self.mkt_embed(market)
-        day_emb = self.day_embed(time_feat) #后两个可以先不加入，跑通之后再说？
-        peak_emb = self.peak_embed(is_peak)
+  
+        #fin_emb = self.fin_embed(finance)
+        #med_emb = self.med_embed(media)
+        #mkt_emb = self.mkt_embed(market)
+        #day_emb = self.day_embed(time_feat) #后两个可以先不加入，跑通之后再说？
+        #peak_emb = self.peak_embed(is_peak)
+
+        fin_inp = self.conti_embed(finance)
+        senti_inp = self.conti_embed(senti)
         
         # 特征合并
-        combined = fin_emb + med_emb + mkt_emb + day_emb + peak_emb  # [B, T, d_model]
-        
-        '''
-        每个特征单独embedding形成 [B,T,d,d_model]?
-        不全部合并，而是分成senti_inp，fin_inp 即[B,T,d_senti,d_model],[B,T,d_fin,d_model]?
-        另外是不是不应该加和而是沿特征维度拼接？例：senti_inp = torch.cat([med_emb,mkt_emb], dim =-2)  （-2对应[B,T,d,d_model]中的d）
-        '''
+        #combined = fin_emb + med_emb + mkt_emb + day_emb + peak_emb  # [B, T, d_model]
         
         '''
         嵌入后的数据：
-        senti_inp: [B，k=1000，d=17, H=d_model]
+        senti_inp: [B，k=1000，d=13, H=d_model]
         fin_inp: [B，k=1000，d=7,H=d_model]
         '''
         
@@ -299,9 +290,9 @@ class TemporalFusionTransformer(nn.Module):
         output, _ = self.attention(enriched, mask_future_timesteps=True )
     
         #截取decoder时段的数据
-        output = output[:, self.encoder_length:, :]
-        temporal_features = temporal_features[:, self.encoder_length:, :]
-        enriched = enriched[:, self.encoder_length:, :]
+        #output = output[:, self.encoder_length:, :]
+        #temporal_features = temporal_features[:, self.encoder_length:, :]
+        #enriched = enriched[:, self.encoder_length:, :]
         
         #gate
         x = self.attention_gate(output)
@@ -315,7 +306,13 @@ class TemporalFusionTransformer(nn.Module):
         x = x + main_features
         x = self.decoder_ln(x)
 
-        # 单点预测
-        output = self.output_layer(output[-1])              # 取最后一个时间步
-        return output.squeeze(1)                              # [B]
+        
+        #output = self.output_layer(output[-1])              
+        #return output.squeeze(1)             
+        # 三点预测
+        x = x[:, -3:, :]  # (B, 3, H)
+        out = self.output_layer(x)  # (B, 3, 3)
+        out = out.unsqueeze(-1)    # (B, 3, 1)
+        return out
+
 
