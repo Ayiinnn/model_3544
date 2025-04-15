@@ -4,6 +4,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+#from typing import Optional, Tuple  
+import math 
 
 if os.environ.get("TFT_SCRIPTING", False):
     from torch.nn import LayerNorm
@@ -114,10 +116,11 @@ class VSN(nn.Module):
 class TCNBlock(nn.Module):
     def __init__(self, hidden_size, dilation):
         super().__init__()
+        padding = 2 * dilation 
         self.conv = nn.Conv1d(
             hidden_size, hidden_size,
-            kernel_size=5, 
-            padding=dilation, 
+            kernel_size=5,
+            padding=padding,
             dilation=dilation
         )
         self.norm = LayerNorm(hidden_size)
