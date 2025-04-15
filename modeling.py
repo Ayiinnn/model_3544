@@ -207,8 +207,9 @@ class TemporalFusionTransformer(nn.Module):
         
         #情绪编码
         self.senti_encoder = CovariateEncoder(config)
-        #金融vsn
+        #金融编码
         self.finVSN = VSN(config, config.fin_varible_num, cs)
+        self.tem_encoder = nn.LSTM(config.hidden_size, config.hidden_size, batch_first=True)
         #ce变换
         self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False)
         self.enrichment_grn = Modified_GRN(config.hidden_size, config.hidden_size, context_hidden_size=config.hidden_size, dropout=config.dropout)
