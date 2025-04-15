@@ -112,38 +112,74 @@ class VSN(nn.Module):
         # 金融部分沿用原来的VSN
 
         return variable_ctx, sparse_weights
-      
-class TCNBlock(nn.Module):
-    def __init__(self, hidden_size, dilation):
-        super().__init__()
-        padding = 2 * dilation 
-        self.conv = nn.Conv1d(
-            hidden_size, hidden_size,
-            kernel_size=5,
-            padding=padding,
-            dilation=dilation
-        )
-        self.norm = LayerNorm(hidden_size)
-        
+
+class Chomp1d(nn.Module):
+    def __init__(self, chomp_size):
+        super(Chomp1d, self).__init__()
+        self.chomp_size = chomp_size
+
     def forward(self, x):
-        # x shape: [B, T, D]
-        x = x.permute(0, 2, 1)  # 转换为[B, D, T]
-        out = self.conv(x)
-        out = out.permute(0, 2, 1)
-        return self.norm(F.relu(out))
+        return x[:, :, : -self.chomp_size].contiguous()
+
+
+class TemporalBlock(nn.Module):
+    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout):
+        super(TemporalBlock, self).__init__()
+
+        self.ll_conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size, stride=stride, padding=padding, dilation=dilation)
+        self.chomp1 = Chomp1d(padding)
+        self.relu1 = nn.LeakyReLU()
+
+        self.ll_conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size, stride=stride, padding=padding, dilation=dilation)
+        self.chomp2 = Chomp1d(padding)
+        self.relu2 = nn.LeakyReLU()
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+
+        residual = x  
+
+        #第一个
+        out = self.ll_conv1(x)
+        out = self.chomp1(out)
+        out = self.relu1(out)
+        out = self.dropout(out)
+
+        #第二个
+        out = self.ll_conv2(out)
+        out = self.chomp2(out)
+        
+        #残差
+        out += residual  
+
+        out = self.relu2(out)
+        out = self.dropout(out)
+
+        return out
 
 class TCN(nn.Module):
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.blocks = nn.ModuleList([
-            TCNBlock(hidden_size, 2**i) 
-            for i in range(6)  # 6层膨胀卷积
-        ])
-        
+    def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.0):
+        super(TCN, self).__init__()
+        layers = []
+        self.num_levels = len(num_channels)
+
+        for i in range(self.num_levels):
+            dilation_size = 2 ** i 
+            in_channels = num_inputs if i == 0 else num_channels[i - 1]
+            out_channels = num_channels[i]
+            layers.append(
+                TemporalBlock(
+                    in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
+                    padding=(kernel_size - 1) * dilation_size, dropout=dropout
+                )
+            )
+
+        self.network = nn.Sequential(*layers)
+
     def forward(self, x):
-        for block in self.blocks:
-            x = x + block(x)  # 残差连接
-        return x
+        return self.network(x)
+
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=1000):
@@ -213,14 +249,16 @@ class TemporalFusionTransformer(nn.Module):
         self.tem_encoder = nn.LSTM(config.hidden_size, config.hidden_size, batch_first=True)
         
         #ce变换
-        self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False,, batch_first=True)
+        self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False, batch_first=True)
         self.enrichment_grn = Modified_GRN(config.hidden_size, config.hidden_size, context_hidden_size=config.hidden_size, dropout=config.dropout)
         self.input_gate = GLU(config.hidden_size, config.hidden_size)
         self.input_gate_ln = LayerNorm(config.hidden_size, eps=1e-3)
       
         # 时序编码
         self.position_encoder = PositionalEncoding(config.hidden_size)
-        self.tcn = TCN(config.hidden_size)
+        
+        self.tcn = TCN(num_inputs=config.hidden_size, num_channels=[config.hidden_size]*6, kernel_size=2, dropout=0.1)
+        
         self.attention_gate = GLU(config.hidden_size, config.hidden_size)
         self.attention_ln = LayerNorm(config.hidden_size, eps=1e-3)
         self.positionwise_grn = GRN(config.hidden_size,
@@ -278,7 +316,10 @@ class TemporalFusionTransformer(nn.Module):
         
         #把enriched输入tcn
         enriched = self.position_encoder(enriched)
+        
+        enriched = enriched.transpose(1, 2) [B,H,K]
         output = self.tcn(enriched)
+        output = output.transpose(1, 2) [B,K,H]
     
         #gate
         x = self.attention_gate(output)
