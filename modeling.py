@@ -236,7 +236,7 @@ class TemporalFusionTransformer(nn.Module):
         self.output_layer = nn.Sequential(
             nn.Linear(config.hidden_size, 3 * config.hidden_size),  
             nn.ReLU(),
-            nn.Linear(3 * config.hidden_size, 3)                  
+            nn.Linear(3 * config.hidden_size, 1)                  
         )  # 输出3个点
 
     def forward(self, x):
@@ -275,7 +275,7 @@ class TemporalFusionTransformer(nn.Module):
         ce: [B，k=1000, H=hidden_size]
         '''
         ch, cc = ch.unsqueeze(0), cc.unsqueeze(0) 
-        ce , _ = self.ce_encoder(ce)              #LSTM
+        ce , _ = self.ce_encoder(ce)              #一层LSTM
 
         #金融编码
         fin_features , _ = self.finVSN(fin_inp,cs) 
@@ -314,8 +314,7 @@ class TemporalFusionTransformer(nn.Module):
         #return output.squeeze(1)             
         # 三点预测
         x = x[:, -3:, :]  # (B, 3, H)
-        out = self.output_layer(x)  # (B, 3, 3)
-        out = out.unsqueeze(-1)    # (B, 3, 1)
+        out = self.output_layer(x)  # (B, 3, 1)
         return out
 
 
