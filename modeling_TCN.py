@@ -324,18 +324,20 @@ class TemporalFusionTransformer(nn.Module):
         main_features = fin + self.input_gate(fin_features)  #skip_connection
         main_features = self.input_gate_ln(main_features)
 
-        #融合
+        # 融合
         enriched = self.enrichment_grn(main_features, c=ce)
         enriched = self.position_encoder(enriched)
         assert enriched.shape == (B, T, self.d_model), f"融合特征应为(B,T,H)，实际{enriched.shape}"
-        
-        enriched = enriched.transpose(1, 2) [B,H,K]
-        assert enriched.shape == (B, self.d_model, T), f"TCN输入应为(B,H,T)，实际{tcn_input.shape}"
-        
+
+        enriched = enriched.transpose(1, 2)
+        assert enriched.shape == (B, self.d_model, T), f"TCN输入应为(B,H,T)，实际{enriched.shape}"
+
         output = self.tcn(enriched)
-        assert output.shape == (B, self.d_model, T), f"TCN输出应为(B,H,T)，实际{tcn_output.shape}"
-        output = output.transpose(1, 2) [B,K,H]
+        assert output.shape == (B, self.d_model, T), f"TCN输出应为(B,H,T)，实际{output.shape}"
+        output = output.transpose(1, 2)
         assert output.shape == (B, T, self.d_model), f"TCN输出转置后应为(B,T,H)，实际{output.shape}"
+
+        # gate
     
         #gate
         x = self.attention_gate(output)
