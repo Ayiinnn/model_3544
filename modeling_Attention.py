@@ -212,7 +212,7 @@ class TemporalFusionTransformer(nn.Module):
         self.tem_encoder = nn.LSTM(config.hidden_size, config.hidden_size, batch_first=True)
         
         #ce变换
-        self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False)
+        self.ce_encoder = nn.LSTM(input_size = config.hidden_size, hidden_size = config.hidden_size, bidirectional = False, , batch_first=True)
         self.enrichment_grn = Modified_GRN(config.hidden_size, config.hidden_size, context_hidden_size=config.hidden_size, dropout=config.dropout)
         self.input_gate = GLU(config.hidden_size, config.hidden_size)
         self.input_gate_ln = LayerNorm(config.hidden_size, eps=1e-3)
