@@ -277,49 +277,65 @@ class TemporalFusionTransformer(nn.Module):
         )  # 输出3个点
 
     def forward(self, x):
-        
+        # 注意config.model 和 config.hidden_size 应一致
         # 输入分解 [B, T, 20]
-        finance = x[:, :, :13]          # 金融13维
-        senti = x[:, :, 13:]          # 媒体+市场7维
+        assert len(x.shape) == 3, f"输入应为3维 [B,T,features]，实际得到 {x.shape}" #检查
+        B, T, _ = x.shape  # 原始输入形状 #检查
+
+        finance = x[:, :, :13]          
+        senti = x[:, :, 13:]          
 
         fin_inp = self.conti_embed(finance)
         senti_inp = self.conti_embed(senti)
-        
+
+        assert fin_inp.shape == (B, T, 13, self.d_model), f"金融嵌入后应为(B,T,13,H)，实际{fin_inp.shape}"
+        assert senti_inp.shape == (B, T, 7, self.d_model), f"情绪嵌入后应为(B,T,7,H)，实际{senti_inp.shape}"
 
         '''
         嵌入后的数据：
         senti_inp: [B，k=1000，d=13, H=d_model]
         fin_inp: [B，k=1000，d=7,H=d_model]
         '''
-        
-        #嵌入后部分
+
         #情绪编码
         cs, ce, ch, cc = self.senti_encoder(senti_inp)
+        
         '''
         cs/ch/cc: [B，H=hidden_size]
         ce: [B，k=1000, H=hidden_size]
         '''
+        assert ce.shape == (B, T, self.d_model), f"情绪上下文(ce)应为(B,T,H)，实际{ce.shape}"
+        
         ch, cc = ch.unsqueeze(0), cc.unsqueeze(0) 
         ce , _ = self.ce_encoder(ce)              #一层LSTM
 
+        assert ce.shape == (B, T, self.d_model), f"情绪上下文处理后(ce)应为(B,T,H)，实际{ce.shape}"
+
         #金融编码
         fin_features , _ = self.finVSN(fin_inp,cs) 
+        assert fin_features.shape == (B, T, self.d_model), f"金融特征应为(B,T,H)，实际{fin_features.shape}"
+        
         '''
         VSN：[B,k,d,d_model]->[B,k,H]
         '''
+        
         fin, state = self.tem_encoder(fin_features, (ch, cc)) #LSTM，维度不变
+        assert fin.shape == (B, T, self.d_model), f"LSTM输出应为(B,T,H)，实际{fin.shape}"
         main_features = fin + self.input_gate(fin_features)  #skip_connection
         main_features = self.input_gate_ln(main_features)
 
         #融合
         enriched = self.enrichment_grn(main_features, c=ce)
-        
-        #把enriched输入tcn
         enriched = self.position_encoder(enriched)
+        assert enriched.shape == (B, T, self.d_model), f"融合特征应为(B,T,H)，实际{enriched.shape}"
         
         enriched = enriched.transpose(1, 2) [B,H,K]
+        assert enriched.shape == (B, self.d_model, T), f"TCN输入应为(B,H,T)，实际{tcn_input.shape}"
+        
         output = self.tcn(enriched)
+        assert output.shape == (B, self.d_model, T), f"TCN输出应为(B,H,T)，实际{tcn_output.shape}"
         output = output.transpose(1, 2) [B,K,H]
+        assert output.shape == (B, T, self.d_model), f"TCN输出转置后应为(B,T,H)，实际{output.shape}"
     
         #gate
         x = self.attention_gate(output)
@@ -336,4 +352,6 @@ class TemporalFusionTransformer(nn.Module):
         # 三点预测
         x = x[:, -3:, :]  # (B, 3, H)
         out = self.output_layer(x)  # (B, 3, 1)
+        assert out.shape == (B, 3, 1), f"最终输出应为(B,3,1)，实际{out.shape}"
+        
         return out
