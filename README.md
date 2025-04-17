@@ -9,7 +9,9 @@ https://drive.google.com/file/d/1NhH97OZJ0LD-z9K5yna4Xhpe7Ydmgob4/view?usp=drive
 ## 更新
 
 ### ---新样本集[2890,1500,24] (24=16+1+6+1)目标集 [2890,6] ([6，24，48小时后的值]+[6，24，48小时后是否涨（涨为1不涨为0）])
+
 （时间窗口处理后，6小时后指最后一个时间步的6小时后）
+
 new_sample.npy和new_targets.npy
 ### ---新样本序列[13056,30] (30=24+6 , 即新样本集时间窗口化之前得到的序列)
 final.csv
